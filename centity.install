@@ -1,0 +1,58 @@
+<?php
+
+/**
+ * Implemenation of hook_schema().
+ */
+function centity_schema() {
+  $schema = array();
+  $schema['centity'] = array(
+    'description' => 'Centity.',
+    'fields' => array(
+      'cid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'description' => 'Primary Key: Unique centity ID.',
+      ),
+      'type' => array(
+        'description' => 'The {centity_type}.type of this centity.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+    ),
+    'indexes' => array(
+      'type' => array('type'),
+    ),
+    'primary key' => array('cid'),
+  );
+  $schema['centity_type'] = array(
+    'description' => 'Stores information about all defined {centity} types.',
+    'fields' => array(
+      'id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'description' => 'Primary Key: Unique centity type identifier.',
+      ),
+      'type' => array(
+        'description' => 'The machine-readable name of this centity type.',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+      ),
+      'label' => array(
+        'description' => 'The human-readable name of this centity type.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+    )  + entity_exportable_schema_fields(),
+    'primary key' => array('id'),
+    'unique keys' => array(
+      'type' => array('type'),
+    ),
+  );
+  return $schema;
+}

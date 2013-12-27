@@ -1,0 +1,462 @@
+<?php
+
+/**
+ * Implement hook_entity_info().
+ */
+function centity_entity_info() {
+  $return['centity'] = array(
+    'label' => t('Centity'),
+    'entity class' => 'Centity',
+    'controller class' => 'CentityController',
+    'base table' => 'centity',
+    'fieldable' => TRUE,
+    'entity keys' => array(
+      'id' => 'cid',
+      'bundle' => 'type',
+    ),
+    'bundles' => array(),
+    'bundle keys' => array(
+      'bundle' => 'type',
+    ),
+    'label callback' => 'entity_class_label',
+    'uri callback' => 'entity_class_uri',
+    'creation callback' => 'centity_create',
+    'access callback' => 'centity_access',
+    'module' => 'centity',
+    'admin ui' => array(
+      'path' => 'admin/content/centity',
+      'file' => 'centity.admin.inc',
+      'controller class' => 'CentityUIController',
+      'menu wildcard' => '%centity',
+    ),
+    'metadata controller class' => 'CentityMetadataController'
+  );
+  $return['centity_type'] = array(
+    'label' => t('Centity Type'),
+    'entity class' => 'CentityType',
+    'controller class' => 'CentityTypeController',
+    'base table' => 'centity_type',
+    'fieldable' => FALSE,
+    'bundle of' => 'centity',
+    'exportable' => TRUE,
+    'entity keys' => array(
+      'id' => 'id',
+      'name' => 'type',
+      'label' => 'label',
+    ),
+    'access callback' => 'centity_type_access',
+    'module' => 'centity',
+    'admin ui' => array(
+      'path' => 'admin/structure/centity-types',
+      'file' => 'centity_type.admin.inc',
+      'controller class' => 'CentityTypeUIController',
+    ),
+  );
+
+  return $return;
+}
+
+/**
+ * Implements hook_entity_info_alter().
+ *
+ * We are adding the info about the centity types via a hook to avoid a recursion
+ * issue as loading the centity types requires the entity info as well.
+ *
+ */
+function centity_entity_info_alter(&$entity_info) {
+  foreach (centity_get_types() as $type => $info) {
+    $entity_info['centity']['bundles'][$type] = array(
+      'label' => $info->label,
+      'admin' => array(
+        'path' => 'admin/structure/centity-types/manage/%centity_type',
+        'real path' => 'admin/structure/centity-types/manage/' . $type,
+        'bundle argument' => 4,
+        'access arguments' => array('administer centity types'),
+      ),
+    );
+  }
+}
+
+/**
+ * Implements hook_permission().
+ */
+function centity_permission() {
+  $permissions = array(
+    'administer centity types' => array(
+      'title' => t('Administer centity types'),
+      'description' => t('Create and delete fields for centity types, and set their permissions.'),
+    ),
+    'administer centities' => array(
+      'title' => t('Administer centities'),
+      'description' => t('Edit and delete all centities'),
+    ),  
+  );
+  
+  //Generate permissions per centity 
+  foreach (centity_get_types() as $type) {
+    $type_name = check_plain($type->type);
+    $permissions += array(
+      "edit any $type_name centity" => array(
+        'title' => t('%type_name: Edit any centity', array('%type_name' => $type->label)),
+      ),
+      "view any $type_name centity" => array(
+        'title' => t('%type_name: View any centity', array('%type_name' => $type->label)),
+      ),
+    );
+  }
+  return $permissions;  
+}
+
+/**
+ * Determines whether the given user has access to a centity.
+ *
+ * @param $op
+ *   The operation being performed. One of 'view', 'update', 'create', 'delete'
+ *   or just 'edit' (being the same as 'create' or 'update').
+ * @param $centity
+ *   Optionally a centity or a centity type to check access for. If nothing is
+ *   given, access for all centities is determined.
+ * @param $account
+ *   The user to check for. Leave it to NULL to check for the global user.
+ * @return boolean
+ *   Whether access is allowed or not.
+ */
+function centity_access($op, $centity = NULL, $account = NULL) {
+  if (user_access('administer centities', $account)) {
+    return TRUE;
+  }
+  if (isset($centity) && $type_name = $centity->type) {
+    $op = ($op == 'view') ? 'view' : 'edit';
+    if (user_access("$op any $type_name centity", $account)) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+/**
+ * Access callback for the entity API.
+ */
+function centity_type_access($op, $type = NULL, $account = NULL) {
+  return user_access('administer centity types', $account);
+}
+
+/**
+ * Gets an array of all centity types, keyed by the type name.
+ *
+ * @param $type_name
+ *   If set, the type with the given name is returned.
+ * @return CentityType
+ *   Depending whether $type isset, an array of centity types or a single one.
+ */
+function centity_get_types($type_name = NULL) {
+  $types = entity_load_multiple_by_name('centity_type', isset($type_name) ? array($type_name) : FALSE);
+  return isset($type_name) ? reset($types) : $types;
+}
+
+/**
+ * Menu argument loader; Load a centity type by string.
+ *
+ * @param $type
+ *   The machine-readable name of a centity type to load.
+ * @return
+ *   A centity type array or FALSE if $type does not exist.
+ */
+function centity_type_load($type) {
+  return centity_get_types($type);
+}
+
+/**
+ * Fetch a centity object. Make sure that the wildcard you choose 
+ * in the centity entity definition fits the function name here.
+ *
+ * @param $cid
+ *   Integer specifying the centity id.
+ * @param $reset
+ *   A boolean indicating that the internal cache should be reset.
+ * @return
+ *   A fully-loaded $centity object or FALSE if it cannot be loaded.
+ *
+ * @see centity_load_multiple()
+ */
+function centity_load($cid, $reset = FALSE) {
+  $centities = centity_load_multiple(array($cid), array(), $reset);
+  return reset($centities);
+}
+
+/**
+ * Load multiple centities based on certain conditions.
+ *
+ * @param $cids
+ *   An array of centity IDs.
+ * @param $conditions
+ *   An array of conditions to match against the {centity} table.
+ * @param $reset
+ *   A boolean indicating that the internal cache should be reset.
+ * @return
+ *   An array of centity objects, indexed by cid.
+ *
+ * @see entity_load()
+ * @see centity_load()
+ */
+function centity_load_multiple($cids = array(), $conditions = array(), $reset = FALSE) {
+  return entity_load('centity', $cids, $conditions, $reset);
+}
+
+/**
+ * Deletes a centity.
+ */
+function centity_delete(Centity $centity) {
+  $centity->delete();
+}
+
+/**
+ * Delete multiple centities.
+ *
+ * @param $cids
+ *   An array of centity IDs.
+ */
+function centity_delete_multiple(array $cids) {
+  entity_get_controller('centity')->delete($cids);
+}
+
+/**
+ * Create a centity object.
+ */
+function centity_create($values = array()) {
+  return entity_get_controller('centity')->create($values);
+}
+
+/**
+ * Saves a centity to the database.
+ *
+ * @param $centity
+ *   The centity object.
+ */
+function centity_save(Centity $centity) {
+  return $centity->save();
+}
+
+/**
+ * Saves a centity type to the db.
+ */
+function centity_type_save(CentityType $type) {
+  $type->save();
+}
+
+/**
+ * Deletes a centity type from the db.
+ */
+function centity_type_delete(CentityType $type) {
+  $type->delete();
+}
+
+/**
+ * URI callback for centities
+ */
+function centity_uri(Centity $centity){
+  return array(
+    'path' => 'centity/' . $centity->cid,
+  );
+}
+
+/**
+ * Menu title callback for showing individual entities
+ */
+function centity_page_title(Centity $centity){
+  return $centity->cid;
+}
+
+/**
+ * Menu title callback for showing individual entities
+ */
+function centity_type_page_title(CentityType $centity_type){
+  return $centity_type->label;
+}
+
+/**
+ * Sets up content to show an individual centity
+ * @todo - get rid of drupal_set_title();
+ */
+function centity_page_view($centity, $view_mode = 'full') {    
+  $controller = entity_get_controller('centity');  
+  $content = $controller->view(array($centity->cid => $centity));
+  drupal_set_title($centity->cid);
+  return $content;
+}
+
+/**
+ * Implements hook_views_api().
+ */
+function centity_views_api() {
+  return array(
+    'api' => 3,
+    'path' => drupal_get_path('module', 'centity') . '/views',
+  );
+}
+
+/**
+ * Implement hook_theme().
+ */
+function centity_theme() {
+  return array(
+    'centity_add_list' => array(
+      'variables' => array('content' => array()),
+      'file' => 'centity.admin.inc',
+    ),
+    'centity' => array(
+      'render element' => 'elements',
+      'template' => 'templates/centity',
+    ),
+  );
+}  
+
+/**
+ * Implements hook_menu_local_tasks_alter().
+ */
+function centity_menu_local_tasks_alter(&$data, $router_item, $root_path) {
+  if ($root_path == 'admin/content/centity') {
+    $item = menu_get_item('admin/content/centity/add');
+    if ($item['access']) {
+      $data['actions']['output'][] = array(
+        '#theme' => 'menu_local_action',
+        '#link' => $item,
+      );
+    }
+  }
+}
+
+/**
+ * The class used for centity entities
+ */
+class Centity extends Entity {
+  
+  public function __construct($values = array()) {
+    parent::__construct($values, 'centity');
+  }
+
+  protected function defaultLabel() {
+    return $this->cid;
+  }
+
+  protected function defaultUri() {
+    return array('path' => 'centity/' . $this->cid);
+  }
+  
+}
+
+/**
+ * The class used for centity type entities
+ */
+class CentityType extends Entity {
+  
+  public $type;
+  public $label;
+  
+  public function __construct($values = array()) {
+    parent::__construct($values, 'centity_type');
+  }
+  
+}
+
+/**
+ * The Controller for Model entities
+ */
+class CentityController extends EntityAPIController {
+  public function __construct($entityType) {
+    parent::__construct($entityType);
+  }
+
+  /**
+   * Create a centity - we first set up the values that are specific
+   * to our centity schema but then also go through the EntityAPIController
+   * function.
+   * 
+   * @param $type
+   *   The machine-readable type of the centity.
+   *
+   * @return
+   *   A centity object with all default fields initialized.
+   */
+  public function create(array $values = array()) {
+    // Add values that are specific to our Model
+    $values += array(
+      'cid' => '',
+      'is_new' => TRUE,
+    );
+    
+    $centity = parent::create($values);
+    return $centity;
+  }
+  
+  /**
+   * Overriding the buldContent function to add entity specific fields
+   */
+  public function buildContent($entity, $view_mode = 'full', $langcode = NULL, $content = array()) {
+    $content = parent::buildContent($entity, $view_mode, $langcode, $content);
+    return $content;
+  }
+  
+}
+
+/**
+ * The Controller for Model entities
+ */
+class CentityTypeController extends EntityAPIControllerExportable {
+  public function __construct($entityType) {
+    parent::__construct($entityType);
+  }
+  
+   /**
+   * Create a centity type - we first set up the values that are specific
+   * to our centity type schema but then also go through the EntityAPIController
+   * function.
+   * 
+   * @param $type
+   *   The machine-readable type of the centity.
+   *
+   * @return
+   *   A centity type object with all default fields initialized.
+   */
+  public function create(array $values = array()) {
+    // Add values that are specific to our Model
+    $values += array( 
+      'id' => '',
+      'is_new' => TRUE,
+    );
+    $centity_type = parent::create($values);
+    return $centity_type;
+  }
+
+}
+
+/**
+ * Form API validate callback for the centity form
+ */
+function centity_edit_form_validate(&$form, &$form_state) {
+  $centity = $form_state['centity'];
+  
+  // Notify field widgets to validate their data.
+  field_attach_form_validate('centity', $centity, $form, $form_state);
+}
+
+/**
+ * Form API submit callback for the centity form.
+ * 
+ * @todo remove hard-coded link
+ */
+function centity_edit_form_submit(&$form, &$form_state) {
+  
+  $centity = entity_ui_controller('centity')->entityFormSubmitBuildEntity($form, $form_state);
+  // Save the centity and go back to the list of centities
+  
+  // Add in created and changed times.
+  if ($centity->is_new = isset($centity->is_new) ? $centity->is_new : 0){
+    $centity->created = time();
+  }
+
+  $centity->changed = time();
+  
+  $centity->save();
+  $form_state['redirect'] = 'admin/content/centity';
+}

@@ -1,0 +1,19 @@
+name = Centity
+description = Custom entity.
+package = Custom
+core = 7.x
+
+dependencies[] = entity
+dependencies[] = views
+
+files[] = centity.info.inc
+files[] = centity.module
+files[] = centity.admin.inc
+files[] = centity_type.admin.inc
+files[] = views/centity.views.inc
+files[] = views/centity_handler_link_field.inc
+files[] = views/centity_handler_edit_link_field.inc
+files[] = views/centity_handler_delete_link_field.inc
+files[] = views/centity_handler_centity_operations_field.inc
+files[] = views/centity_handler_centity_type_field.inc
+files[] = views/centity_handler_filter_centity_type_field.inc
