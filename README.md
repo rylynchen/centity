@@ -1,1 +1,1 @@
-Drupal custom entity module.
+A drupal custom entity module.
